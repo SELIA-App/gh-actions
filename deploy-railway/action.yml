@@ -1,0 +1,84 @@
+name: Deploy to Railway
+description: |
+  Reusable deploy step for Railway.
+  Cleans common non-deployment files and any extra paths, then runs `railway up`.
+  The calling job must make the `railway` CLI available (e.g. `container: ghcr.io/railwayapp/cli:latest`).
+  Provide the token via the `railway-token` input.
+
+inputs:
+  service:
+    description: Railway service name to deploy.
+    required: true
+
+  working-directory:
+    description: Project directory (relative to the repository root) to deploy from.
+    required: false
+    default: "."
+
+  cleanup:
+    description: Remove common non-deployment files (.git, .gitignore, .env*) before uploading.
+    required: false
+    default: "true"
+
+  additional-cleanup:
+    description: |
+      Optional list of extra files or directories to remove before deploying.
+      Entries can be separated by spaces, commas, or newlines. Paths are relative to `working-directory`.
+    required: false
+    default: ""
+
+  railway-token:
+    description: Railway API token.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Base cleanup
+      if: ${{ inputs.cleanup == 'true' }}
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set -e
+        echo "Base cleanup in $(pwd)"
+
+        for item in .git .gitignore; do
+          if [ -e "$item" ]; then
+            rm -rf "$item"
+            echo "Removed $item"
+          fi
+        done
+
+        # Remove any .env* files/directories without failing when none exist.
+        for env_item in .env*; do
+          if [ -e "$env_item" ]; then
+            rm -rf "$env_item"
+            echo "Removed $env_item"
+          fi
+        done
+
+    - name: Additional cleanup
+      if: ${{ inputs.additional-cleanup != '' }}
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set -e
+        echo "Additional cleanup in $(pwd)"
+
+        # Normalize commas/newlines to spaces and iterate.
+        for entry in $(printf '%s' "${{ inputs.additional-cleanup }}" | tr ',\n' ' '); do
+          [ -z "$entry" ] && continue
+          if [ -e "$entry" ]; then
+            rm -rf "$entry"
+            echo "Removed $entry"
+          else
+            echo "Not found for cleanup: $entry"
+          fi
+        done
+
+    - name: Deploy to Railway
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        RAILWAY_TOKEN: ${{ inputs.railway-token }}
+      run: railway up --service "${{ inputs.service }}"
